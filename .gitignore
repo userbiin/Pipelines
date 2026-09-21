@@ -1,0 +1,17 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+submission.zip
+.DS_Store
+
+# course materials (not published)
+RUBRIC.md
+HINT.md
+RUBRIC
+HINT
+
+# local / generated
+.pytest_cache/
+submission/
+Claude outputs/
