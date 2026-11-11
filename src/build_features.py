@@ -96,7 +96,7 @@ def rolling_aggs(ctx):
                 WINDOW w AS (
                     PARTITION BY restaurant_id
                     ORDER BY dt
-                    RANGE BETWEEN INTERVAL {WINDOW_DAYS} DAY PRECEDING AND CURRENT ROW
+                    RANGE BETWEEN INTERVAL {WINDOW_DAYS} DAY PRECEDING AND INTERVAL 1 DAY PRECEDING
                 )
             )
             SELECT
@@ -110,7 +110,8 @@ def rolling_aggs(ctx):
             WHERE dt = DATE '{ctx.dt}'
             ORDER BY restaurant_id
         ) TO '{ctx.stage_dir}/aggs.parquet' (FORMAT parquet)
-    """)
+    """) # Part2 : line 99 DAY CURRENT ROW -> 30 ~ 1 day before 
+    # AI Assistance : modified SQL Query ({WINDOW_DAYS - 29} DAY PRECEDING ROW -> INTERVAL 1 DAY PRECEDING)
 
 
 @stage("write_aggs", after="rolling_aggs")
@@ -119,5 +120,5 @@ def write_aggs(ctx):
     aggs = ctx.output_of("rolling_aggs") / "aggs.parquet"
     ctx.con.execute(f"""
         COPY (SELECT *, '{ctx.run_id}' AS run_id FROM read_parquet('{aggs}'))
-        TO '{ctx.aggs_dir}' (FORMAT parquet, PARTITION_BY (dt), APPEND)
-    """)
+        TO '{ctx.aggs_dir}' (FORMAT parquet, PARTITION_BY (dt), OVERWRITE_OR_IGNORE)
+    """)  # Part1 : line 122 APPEND -> OVERWRITE_OR_IGNORE

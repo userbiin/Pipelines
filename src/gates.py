@@ -31,7 +31,7 @@ and returns a GateResult(passed, observed, expected, detail). Everything but
 from src.runner import GateResult, gate
 
 
-@gate(name="rows_in_vs_trailing_7d", on_fail=None)
+@gate(name="rows_in_vs_trailing_7d", on_fail="quarantine") # on_fail = None -> quarantine
 def rows_in_vs_trailing_7d(ctx, joined) -> GateResult:
     """Today's delivery count must be within 15% of the mean of the previous 7 days.
 
@@ -63,3 +63,43 @@ def rows_in_vs_trailing_7d(ctx, joined) -> GateResult:
         detail=f"today / trailing 7-day mean = {ratio:.3f}",
     )
 
+
+# Part 3: Add a new gate
+NUMERIC_COLUMNS = ["cart_size", "cart_value", "prep_time_minutes", "delivery_minutes", "distance_km"]
+RATIO_LOW, RATIO_HIGH = 0.9, 1.1  # normal days stayed within 0.983-1.018
+
+
+# AI-assisted: first draft by AI; band chosen from my own measurement of normal days
+@gate(name="medians_vs_trailing_7d", on_fail="fail")
+def medians_vs_trailing_7d(ctx, joined) -> GateResult:
+    medians = ", ".join(f"median({c}) AS {c}" for c in NUMERIC_COLUMNS)
+    today = ctx.con.execute(f"""
+        SELECT {medians} FROM {joined} WHERE delivery_date = DATE '{ctx.dt}'
+    """).fetchone()
+
+    # trailing level = mean of the previous 7 days' daily medians
+    trailing = ctx.con.execute(f"""
+        SELECT {", ".join(f"avg({c})" for c in NUMERIC_COLUMNS)} FROM (
+            SELECT {medians}
+            FROM {joined}
+            WHERE delivery_date BETWEEN DATE '{ctx.dt}' - INTERVAL 7 DAY AND DATE '{ctx.dt}' - INTERVAL 1 DAY
+            GROUP BY delivery_date
+        )
+    """).fetchone()
+
+    ratios = {}
+    for col, now, past in zip(NUMERIC_COLUMNS, today, trailing):
+        if now is None or not past:
+            continue  # nothing to compare against
+        ratios[col] = now / past
+
+    if not ratios:
+        return GateResult(passed=True, observed=None, expected=None, detail="no trailing history yet")
+
+    out_of_band = {c: round(r, 3) for c, r in ratios.items() if not RATIO_LOW <= r <= RATIO_HIGH}
+    return GateResult(
+        passed=not out_of_band,
+        observed={c: round(r, 3) for c, r in ratios.items()},
+        expected=f"every ratio within {RATIO_LOW}-{RATIO_HIGH}",
+        detail=f"out of band: {out_of_band}" if out_of_band else "all numeric medians within band",
+    )
